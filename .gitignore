@@ -1,6 +1,7 @@
 # Credenciales - NUNCA subir al repositorio
 .env
 credentials/*.json
+credentials/*.db
 !credentials/.gitkeep
 
 # Python
