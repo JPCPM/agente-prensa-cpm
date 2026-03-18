@@ -1,0 +1,58 @@
+name: Actualización Diaria - Agente de Prensa CPM
+
+on:
+  # Ejecutar todos los días a las 8:00 AM hora argentina (UTC-3 = 11:00 UTC)
+  schedule:
+    - cron: '0 11 * * *'
+
+  # También permite ejecutarlo manualmente desde la interfaz de GitHub
+  workflow_dispatch:
+    inputs:
+      razon:
+        description: 'Razón de la ejecución manual (opcional)'
+        required: false
+        default: 'Prueba manual'
+
+jobs:
+  actualizar-planilla:
+    name: Actualizar Google Sheet
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Descargar código
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 📦 Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: 🤖 Ejecutar agente
+        env:
+          GOOGLE_SHEET_ID:           ${{ secrets.GOOGLE_SHEET_ID }}
+          GOOGLE_CREDENTIALS_JSON:   ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
+          GOOGLE_CSE_API_KEY:        ${{ secrets.GOOGLE_CSE_API_KEY }}
+          GOOGLE_CSE_ID:             ${{ secrets.GOOGLE_CSE_ID }}
+          INSTAGRAM_ACCESS_TOKEN:    ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
+          INSTAGRAM_USER_ID:         ${{ secrets.INSTAGRAM_USER_ID }}
+          TWITTER_BEARER_TOKEN:      ${{ secrets.TWITTER_BEARER_TOKEN }}
+          TWITTER_USERNAME:          ${{ secrets.TWITTER_USERNAME }}
+          LINKEDIN_ACCESS_TOKEN:     ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_ORGANIZATION_ID:  ${{ secrets.LINKEDIN_ORGANIZATION_ID }}
+        run: python src/main.py
+
+      - name: ✅ Confirmar éxito
+        if: success()
+        run: echo "Agente ejecutado correctamente el $(date +'%Y-%m-%d %H:%M UTC')"
+
+      - name: ❌ Notificar error
+        if: failure()
+        run: |
+          echo "ERROR: El agente falló. Revisá los logs de esta ejecución."
+          echo "Podés re-ejecutar manualmente desde la pestaña Actions en GitHub."
+          exit 1
