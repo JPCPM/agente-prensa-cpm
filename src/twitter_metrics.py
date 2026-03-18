@@ -77,22 +77,31 @@ async def _fetch_metrics(username: str, email: str, password: str) -> dict:
 
 
 class TwitterMetrics:
-    """Obtiene tweets y métricas de la cuenta del CPM en X/Twitter."""
+    """
+    Métricas de Twitter/X.
+    Como la API gratuita no permite lectura, el agente crea la fila
+    con la fecha del día y deja los campos para carga manual.
+    """
 
     def __init__(self):
         self.username = os.environ.get("TWITTER_USERNAME", "cpmigratorias")
-        self.email    = os.environ.get("TWITTER_EMAIL", "")
-        self.password = os.environ.get("TWITTER_PASSWORD", "")
 
     def get_daily_metrics(self) -> dict:
-        if not self.email or not self.password:
-            logger.warning("Twitter/X: credenciales no configuradas.")
-            return {"metodo": "Sin credenciales"}
-
-        try:
-            return asyncio.run(
-                _fetch_metrics(self.username, self.email, self.password)
-            )
-        except Exception as e:
-            logger.error(f"Twitter/X: error al obtener métricas: {e}")
-            return {"metodo": f"Error: {e}"}
+        """
+        Retorna una fila con la fecha y campos vacíos para carga manual.
+        El usuario completa los datos desde el perfil de @cpmigratorias.
+        """
+        logger.info(
+            "Twitter/X: generando fila para carga manual. "
+            f"Completar en la planilla los datos de @{self.username}."
+        )
+        return {
+            "seguidores":       "→ COMPLETAR MANUALMENTE",
+            "tweets_nuevos":    "→ COMPLETAR MANUALMENTE",
+            "likes_total":      "→ COMPLETAR MANUALMENTE",
+            "retweets_total":   "→ COMPLETAR MANUALMENTE",
+            "respuestas_total": "→ COMPLETAR MANUALMENTE",
+            "impresiones":      "N/D",
+            "tweet_urls":       f"https://twitter.com/{self.username}",
+            "metodo":           "Carga manual — ver perfil @cpmigratorias",
+        }
