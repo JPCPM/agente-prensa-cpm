@@ -1,93 +1,98 @@
 """
-Métricas de X / Twitter usando la API oficial v2 (plan gratuito).
+Métricas de X / Twitter usando twscrape (gratuito, sin API oficial).
 
 Requiere:
-  - TWITTER_BEARER_TOKEN  → token de solo lectura
-  - TWITTER_USERNAME      → nombre de usuario sin @ (ej: "CPMigratorias")
+  - TWITTER_USERNAME  → nombre de usuario sin @ (ej: cpmigratorias)
+  - TWITTER_EMAIL     → email de la cuenta
+  - TWITTER_PASSWORD  → contraseña de la cuenta
 
-Plan gratuito incluye:
-  ✓ Tweets propios de las últimas 24h
-  ✓ Cantidad de seguidores
-  ✓ Likes y retweets
-  ✗ Impresiones (requiere plan de pago)
-
-Para obtener el token ver README.md → Sección "Configurar Twitter/X API".
+twscrape usa la API interna de Twitter/X para obtener datos sin costo.
 """
 import os
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-
-import tweepy
-from utils import get_today
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# Ruta donde twscrape guarda la sesión (para no loguearse cada vez)
+DB_PATH = str(Path(__file__).parent.parent / "credentials" / "twscrape.db")
+
+
+async def _fetch_metrics(username: str, email: str, password: str) -> dict:
+    """Función async que obtiene los datos de Twitter/X."""
+    import twscrape
+
+    api = twscrape.API(DB_PATH)
+
+    # Agregar cuenta solo si no existe ya en la base de datos
+    try:
+        await api.pool.add_account(
+            username=username,
+            password=password,
+            email=email,
+            email_password="",   # No requerido para la mayoría de cuentas
+        )
+        await api.pool.login_all()
+    except Exception as e:
+        logger.debug(f"twscrape login: {e} (puede ser normal si ya estaba logueado)")
+
+    # Obtener datos del usuario
+    user = await api.user_by_login(username)
+    if not user:
+        return {"metodo": "Error: usuario no encontrado"}
+
+    seguidores = user.followersCount
+
+    # Obtener tweets de las últimas 24 horas
+    corte      = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+    tweets_hoy = []
+
+    async for tweet in api.user_tweets(user.id, limit=50):
+        if tweet.date < corte:
+            break
+        # Excluir retweets
+        if tweet.retweetedTweet:
+            continue
+        tweets_hoy.append(tweet)
+
+    likes_total      = sum(t.likeCount      for t in tweets_hoy)
+    retweets_total   = sum(t.retweetCount   for t in tweets_hoy)
+    respuestas_total = sum(t.replyCount     for t in tweets_hoy)
+    tweet_urls       = [
+        f"https://twitter.com/{username}/status/{t.id}" for t in tweets_hoy
+    ]
+
+    return {
+        "seguidores":       seguidores,
+        "tweets_nuevos":    len(tweets_hoy),
+        "likes_total":      likes_total,
+        "retweets_total":   retweets_total,
+        "respuestas_total": respuestas_total,
+        "impresiones":      "N/D",
+        "tweet_urls":       " | ".join(tweet_urls),
+        "metodo":           "twscrape",
+    }
 
 
 class TwitterMetrics:
     """Obtiene tweets y métricas de la cuenta del CPM en X/Twitter."""
 
     def __init__(self):
-        bearer_token       = os.environ.get("TWITTER_BEARER_TOKEN", "")
-        self.username      = os.environ.get("TWITTER_USERNAME", "")
-        self.client        = tweepy.Client(bearer_token=bearer_token) if bearer_token else None
+        self.username = os.environ.get("TWITTER_USERNAME", "cpmigratorias")
+        self.email    = os.environ.get("TWITTER_EMAIL", "")
+        self.password = os.environ.get("TWITTER_PASSWORD", "")
 
     def get_daily_metrics(self) -> dict:
-        """
-        Retorna un dict con las métricas del día:
-          - seguidores, tweets_nuevos, likes_total, retweets_total,
-            respuestas_total, impresiones, tweet_urls, metodo
-        """
-        if not self.client or not self.username:
+        if not self.email or not self.password:
             logger.warning("Twitter/X: credenciales no configuradas.")
             return {"metodo": "Sin credenciales"}
 
         try:
-            # 1. Obtener el ID del usuario a partir del username
-            user_resp = self.client.get_user(
-                username=self.username,
-                user_fields=["public_metrics"],
+            return asyncio.run(
+                _fetch_metrics(self.username, self.email, self.password)
             )
-            user       = user_resp.data
-            user_id    = user.id
-            seguidores = user.public_metrics.get("followers_count", "")
-
-            # 2. Obtener tweets de las últimas 24 horas
-            corte      = datetime.now(tz=timezone.utc) - timedelta(hours=24)
-            tweets_resp = self.client.get_users_tweets(
-                id            = user_id,
-                start_time    = corte,
-                tweet_fields  = ["public_metrics", "created_at"],
-                max_results   = 100,
-                exclude       = ["retweets", "replies"],   # solo tweets originales
-            )
-
-            tweets = tweets_resp.data or []
-
-            likes_total      = 0
-            retweets_total   = 0
-            respuestas_total = 0
-            tweet_urls       = []
-
-            for tweet in tweets:
-                m = tweet.public_metrics
-                likes_total      += m.get("like_count",   0)
-                retweets_total   += m.get("retweet_count", 0)
-                respuestas_total += m.get("reply_count",  0)
-                tweet_urls.append(
-                    f"https://twitter.com/{self.username}/status/{tweet.id}"
-                )
-
-            return {
-                "seguidores":      seguidores,
-                "tweets_nuevos":   len(tweets),
-                "likes_total":     likes_total,
-                "retweets_total":  retweets_total,
-                "respuestas_total": respuestas_total,
-                "impresiones":     "N/D (plan gratuito)",
-                "tweet_urls":      " | ".join(tweet_urls),
-                "metodo":          "Twitter API v2 (plan gratuito)",
-            }
-
         except Exception as e:
             logger.error(f"Twitter/X: error al obtener métricas: {e}")
             return {"metodo": f"Error: {e}"}

@@ -33,7 +33,7 @@ RSS_FEEDS = [
     {"url": "https://chequeado.com/feed/",                         "medio": "Chequeado",     "tipo": "Digital"},
     # Medios especializados en migración / derechos humanos
     {"url": "https://www.acnur.org/es/rss.xml",                    "medio": "ACNUR",         "tipo": "Digital"},
-    {"url": "https://agenciade noticias.io/feed/",                 "medio": "AgenciaN",      "tipo": "Digital"},
+    {"url": "https://agenciadenoticias.io/feed/",                  "medio": "AgenciaN",      "tipo": "Digital"},
 ]
 
 
