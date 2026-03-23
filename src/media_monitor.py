@@ -15,33 +15,35 @@ from urllib.parse import quote
 
 import feedparser
 import requests
+from duckduckgo_search import DDGS
 from utils import truncate, deduplicate_by_url
 
 logger = logging.getLogger(__name__)
 
-# Término a buscar en todos los medios
-TERMINO_BUSQUEDA = "Centro de Políticas Migratorias"
+# Términos a buscar (se busca cada uno por separado)
+TERMINOS_BUSQUEDA = [
+    "Centro de Políticas Migratorias",
+    "Centro de Politicas Migratorias",
+    "Juan Pablo Ramaciotti",
+    "Olaya Grau",
+]
 
 # Google News RSS — busca en TODA la web en español, sin API key
-# Cubre automáticamente medios de Argentina, Chile, México, Colombia, etc.
+# Una entrada por cada término × región
 GOOGLE_NEWS_FEEDS = [
-    {
-        "url": f"https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22&hl=es-419&gl=US&ceid=US:es-419",
-        "medio": "Google News",
-        "tipo": "Digital",
-    },
-    {
-        # Búsqueda específica para Chile
-        "url": f"https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22&hl=es-CL&gl=CL&ceid=CL:es",
-        "medio": "Google News Chile",
-        "tipo": "Digital",
-    },
-    {
-        # Búsqueda específica para Argentina
-        "url": f"https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22&hl=es-AR&gl=AR&ceid=AR:es",
-        "medio": "Google News Argentina",
-        "tipo": "Digital",
-    },
+    # Término 1 — toda América Latina (when:7d fuerza resultados de los últimos 7 días)
+    {"url": "https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22+when%3A7d&hl=es-419&gl=US&ceid=US:es-419", "medio": "Google News",           "tipo": "Digital"},
+    {"url": "https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22+when%3A7d&hl=es-CL&gl=CL&ceid=CL:es",     "medio": "Google News Chile",     "tipo": "Digital"},
+    {"url": "https://news.google.com/rss/search?q=%22Centro+de+Pol%C3%ADticas+Migratorias%22+when%3A7d&hl=es-AR&gl=AR&ceid=AR:es",     "medio": "Google News Argentina", "tipo": "Digital"},
+    # Término 2 — sin tilde
+    {"url": "https://news.google.com/rss/search?q=%22Centro+de+Politicas+Migratorias%22+when%3A7d&hl=es-419&gl=US&ceid=US:es-419",     "medio": "Google News",           "tipo": "Digital"},
+    {"url": "https://news.google.com/rss/search?q=%22Centro+de+Politicas+Migratorias%22+when%3A7d&hl=es-CL&gl=CL&ceid=CL:es",         "medio": "Google News Chile",     "tipo": "Digital"},
+    # Término 3 — Juan Pablo Ramaciotti
+    {"url": "https://news.google.com/rss/search?q=%22Juan+Pablo+Ramaciotti%22+when%3A7d&hl=es-419&gl=US&ceid=US:es-419",               "medio": "Google News",           "tipo": "Digital"},
+    {"url": "https://news.google.com/rss/search?q=%22Juan+Pablo+Ramaciotti%22+when%3A7d&hl=es-CL&gl=CL&ceid=CL:es",                   "medio": "Google News Chile",     "tipo": "Digital"},
+    # Término 4 — Olaya Grau
+    {"url": "https://news.google.com/rss/search?q=%22Olaya+Grau%22+when%3A7d&hl=es-419&gl=US&ceid=US:es-419",                         "medio": "Google News",           "tipo": "Digital"},
+    {"url": "https://news.google.com/rss/search?q=%22Olaya+Grau%22+when%3A7d&hl=es-CL&gl=CL&ceid=CL:es",                              "medio": "Google News Chile",     "tipo": "Digital"},
 ]
 
 # RSS feeds de medios especializados en migración y derechos humanos
@@ -69,21 +71,16 @@ class MediaMonitor:
         No requiere API key ni tiene límite de uso.
         """
         resultados = []
-        corte      = datetime.now(tz=timezone.utc) - timedelta(hours=24)
-
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+        }
         for feed_info in GOOGLE_NEWS_FEEDS:
             try:
-                feed = feedparser.parse(feed_info["url"])
+                resp = requests.get(feed_info["url"], headers=headers, timeout=15)
+                feed = feedparser.parse(resp.content)
                 for entry in feed.entries:
                     titulo  = entry.get("title", "")
                     resumen = entry.get("summary", "")
-
-                    # Filtro de fecha
-                    fecha_entry = entry.get("published_parsed")
-                    if fecha_entry:
-                        fecha_dt = datetime(*fecha_entry[:6], tzinfo=timezone.utc)
-                        if fecha_dt < corte:
-                            continue
 
                     # Detectar el medio real desde el título de Google News
                     # (Google News incluye "- Nombre del Medio" al final del título)
@@ -112,8 +109,8 @@ class MediaMonitor:
     def buscar_en_rss_especializados(self) -> list:
         """Parsea RSS de medios especializados en migración y DDHH."""
         resultados = []
-        termino    = TERMINO_BUSQUEDA.lower()
-        corte      = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+        terminos   = [t.lower() for t in TERMINOS_BUSQUEDA]
+        corte      = datetime.now(tz=timezone.utc) - timedelta(hours=48)
 
         for feed_info in RSS_FEEDS_ESPECIALIZADOS:
             try:
@@ -123,7 +120,7 @@ class MediaMonitor:
                     resumen = entry.get("summary", "")
                     texto   = (titulo + " " + resumen).lower()
 
-                    if termino not in texto:
+                    if not any(t in texto for t in terminos):
                         continue
 
                     fecha_entry = entry.get("published_parsed")
@@ -147,6 +144,52 @@ class MediaMonitor:
         return resultados
 
     # ------------------------------------------------------------------
+    # DuckDuckGo (búsqueda en toda la web, gratis, sin API key)
+    # ------------------------------------------------------------------
+    def buscar_en_duckduckgo(self) -> list:
+        """
+        Busca menciones del CPM en toda la web usando DuckDuckGo.
+        Gratis, sin API key, cubre todos los medios de América Latina.
+        """
+        resultados = []
+        try:
+            with DDGS() as ddgs:
+                for termino in TERMINOS_BUSQUEDA:
+                    try:
+                        results = list(ddgs.text(
+                            f'"{termino}"',
+                            region="wt-wt",
+                            timelimit="w",
+                            max_results=10,
+                        ))
+                        for r in results:
+                            titulo  = r.get("title", "")
+                            cuerpo  = r.get("body", "")
+                            texto   = (titulo + " " + cuerpo).lower()
+
+                            # Filtrar: solo incluir si el resultado realmente contiene el término
+                            if termino.lower() not in texto:
+                                continue
+
+                            url   = r.get("href", "")
+                            medio = url.split("/")[2].replace("www.", "") if url else "Desconocido"
+                            resultados.append({
+                                "titulo":     titulo,
+                                "medio":      medio,
+                                "tipo_medio": "Digital",
+                                "url":        url,
+                                "resumen":    truncate(cuerpo),
+                                "fuente":     "DuckDuckGo",
+                            })
+                    except Exception as e:
+                        logger.warning(f"DuckDuckGo error buscando '{termino}': {e}")
+        except Exception as e:
+            logger.error(f"Error en DuckDuckGo: {e}")
+
+        logger.info(f"DuckDuckGo: {len(resultados)} menciones encontradas.")
+        return resultados
+
+    # ------------------------------------------------------------------
     # Google Custom Search API (opcional, refuerzo adicional)
     # ------------------------------------------------------------------
     def buscar_en_google_cse(self) -> list:
@@ -160,10 +203,11 @@ class MediaMonitor:
 
         resultados = []
         try:
+            query = " OR ".join(f'"{t}"' for t in TERMINOS_BUSQUEDA)
             params = {
                 "key":          self.google_api_key,
                 "cx":           self.google_cse_id,
-                "q":            f'"{TERMINO_BUSQUEDA}"',
+                "q":            query,
                 "dateRestrict": "d1",
                 "num":          10,
                 "lr":           "lang_es",
@@ -202,6 +246,7 @@ class MediaMonitor:
         """
         menciones  = []
         menciones += self.buscar_en_google_news()
+        menciones += self.buscar_en_duckduckgo()
         menciones += self.buscar_en_rss_especializados()
         menciones += self.buscar_en_google_cse()
 
